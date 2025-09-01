@@ -1,50 +1,46 @@
 import ee
+import numpy as np
+import rasterio
+from rasterio.mask import mask
 
-def get_mean_temp(district_geom, start_date, end_date):
+# Mean temperature via MODIS dynamically from EE
+def get_mean_temp(geom, start_date, end_date):
     try:
-        modis = ee.ImageCollection("MODIS/006/MOD11A1") \
+        region = ee.Geometry.Polygon(list(geom.exterior.coords))
+        dataset = ee.ImageCollection('MODIS/006/MOD11A1') \
                     .filterDate(start_date, end_date) \
-                    .select("LST_Day_1km") \
-                    .mean()
-        stats = modis.reduceRegion(
+                    .select('LST_Day_1km')
+        mean_lst = dataset.mean().reduceRegion(
             reducer=ee.Reducer.mean(),
-            geometry=district_geom,
+            geometry=region,
             scale=1000
-        ).getInfo()
-        value = stats.get("LST_Day_1km")
-        if value is not None:
-            return value * 0.02 - 273.15  # Convert MODIS LST to °C
-        return None
+        )
+        value = mean_lst.get('LST_Day_1km').getInfo()
+        return value * 0.02 - 273.15  # scale factor to Celsius
     except Exception as e:
-        return f"Error fetching MODIS data: {e}"
+        raise Exception(f"Error fetching MODIS data: {e}")
 
-def calculate_ndvi(district_geom, start_date, end_date):
+# Population density from raster
+def calculate_population_density(geom, raster):
     try:
-        ndvi = ee.ImageCollection("MODIS/006/MOD13A2") \
-                    .filterDate(start_date, end_date) \
-                    .select("NDVI") \
-                    .mean()
-        stats = ndvi.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=district_geom,
-            scale=500
-        ).getInfo()
-        value = stats.get("NDVI")
-        if value is not None:
-            return value / 10000  # MODIS NDVI scaling
-        return None
+        if hasattr(geom, 'geometry'):
+            geom = geom.geometry
+        out_image, out_transform = mask(raster, [geom], crop=True)
+        arr = out_image[0]
+        arr = arr[arr > 0]
+        return float(np.mean(arr)) if arr.size > 0 else None
     except Exception as e:
-        return f"Error fetching NDVI data: {e}"
+        raise Exception(f"Error computing Population Density: {e}")
 
-def calculate_population_density(district_geom):
+# NDVI from raster
+def calculate_ndvi(geom, raster):
     try:
-        pop = ee.ImageCollection("CIESIN/GPWv411/GPW_Population_Density").mosaic()
-        stats = pop.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=district_geom,
-            scale=1000
-        ).getInfo()
-        value = stats.get("population_density")
-        return value
+        if hasattr(geom, 'geometry'):
+            geom = geom.geometry
+        out_image, out_transform = mask(raster, [geom], crop=True)
+        arr = out_image[0]
+        arr = arr[arr != raster.nodata]
+        return float(np.mean(arr)) if arr.size > 0 else None
     except Exception as e:
-        return f"Error fetching population density: {e}"
+        raise Exception(f"Error computing NDVI: {e}")
+

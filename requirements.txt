@@ -1,4 +1,6 @@
 streamlit
 geopandas
+rasterio
+numpy
 earthengine-api
 google-auth
